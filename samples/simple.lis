@@ -1,0 +1,9 @@
+program
+ { 
+    n := 6; 
+    
+    a := n; 
+    facn := 1  
+    while (a > 0) 
+     {facn := a * facn; a := a - 1}
+ } 

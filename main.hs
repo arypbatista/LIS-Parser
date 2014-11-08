@@ -15,6 +15,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 -}
 import Data.Char (ord)
+import System.IO (readFile)
+
 
 data Memory = Memory [(VarName, Int)]
     
@@ -133,8 +135,6 @@ instance Show Program where
 
 newtype Parser a = Parser (String -> [(a, String)])
 
-parse (Parser x) = x
-
 class Monad m => MonadZeroOr m where
     zero  ::  m a
     (<|>)  ::  m a -> m a -> m a
@@ -172,8 +172,8 @@ symbol x = satisfy (==x)
 token :: String -> Parser String
 token "" = do return ""
 token (c:cs) = do
-                 _ <- symbol c
-                 _ <- token cs
+                 symbol c
+                 token cs
                  return (c:cs)
 
 skip = token "Skip" <@ const Skip
@@ -187,9 +187,9 @@ many p = (do
 --commands = many command
 
 pack open p close = do
-                      _ <- open
+                      open
                       x <- p
-                      _ <- close
+                      close
                       return x
                                 
 block = pack (symbol '{') commands (symbol '}')
@@ -224,7 +224,10 @@ listOfOpt p sep = many (do
 
 
 
-commands = listOf command (option (token ";"))
+commands = do
+             cs <- listOf command (option (token ";"))
+             option (token ";")
+             return cs
 
 assign = do
            v <- varname
@@ -247,22 +250,40 @@ alphanum = letter <|> digit
 word = word' <|> return ""
        where
         word' = do
-                  x <- letter
+                  x  <- letter
                   xs <- word
                   return (x:xs)
 
 wordPrefixed p = do
-                    x <- lower
+                    x  <- lower
                     xs <- word
                     return (x:xs)
 
-lowerId = wordPrefixed lower
+alphanumWord = alphanumWord' <|> return ""
+               where
+                alphanumWord' = do
+                          x  <- alphanum
+                          xs <- alphanumWord
+                          return (x:xs)
+                          
+anWordPrefixed pref = do
+                       x  <- pref
+                       xs <- alphanumWord
+                       return (x:xs)
+
+
+lowerId = anWordPrefixed lower
 
 varname = lowerId
 
 -- nExpr
 
-natural = many digit
+many1 p = do
+            x  <- p
+            xs <- many p
+            return (x:xs)
+
+natural = many1 digit
 
 optionDef p def = p <|> return def
 
@@ -286,9 +307,8 @@ parenthesized p = pack (symbol '(') p (symbol ')')
 p <@ f = do { x <- p; return (f x); }
 
 nExpr = term `chainl1` addop
---term  = factor `chainr1` (apply mulop (,,,))
---factor = integer <|> parenthesized nExpr
-term = integer <|> variable
+term  = factor `chainr1` mulop
+factor = integer <|> variable <|> parenthesized nExpr
 
 variable = varname <@ Variable
 
@@ -306,22 +326,30 @@ p `chainl1` op = do { x <- p;  rest x }
                                  
 p `chainr1` op = do 
                     x <- p
-                    return ((do 
-                                f <- op
-                                y <- p `chainr1` op
-                                return (f x y) ) <|> return x)
+                    (do 
+                        f <- op
+                        y <- p `chainr1` op
+                        return (f x y) ) <|> return x
                                 
 inn :: Eq a => a -> [a] -> Bool
 x `inn` xs = foldr (\y r -> r || (y == x)) False xs
 
-junkOut (c:cs) = if c `inn` "\n\t " then
-                    junkOut cs
+removeWhites = dropWhile (\c -> c `inn` ['\n', '\t', ' '])
+
+removeComments ('-':'-':inp) = dropWhile (\x -> x /= '\n') inp
+removeComments inp = inp
+                               
+junkOut [] = []
+junkOut inp = let inp' = (removeWhites . removeComments) inp
+              in if inp' /= inp then
+                    junkOut inp'
                  else
-                    c:cs
+                    inp'
+                
 
 instance Monad Parser where
-    return v         =  Parser (\inp -> [(v, inp)])
-    Parser p >>= f   =  Parser (\inp -> concat [ parse (f v) out | (v, out) <- p ( junkOut inp)])
+    return v         =  Parser (\inp -> [(v, junkOut inp)])
+    Parser p >>= f   =  Parser (\inp -> concat [ parse (f v) (junkOut out) | (v, out) <- p ( junkOut inp)])
                 
                 
 -- Introduce iff
@@ -360,17 +388,26 @@ iffelse = do
             bf <- block
             return bf
         
+while = do
+            token "while"
+            bexp <- parenthesized bExpr
+            blk  <- block
+            return (While bexp blk)
         
         
 
 command  =  skip
         <|> assign
         <|> iff
+        <|> while
 
 
 
 
-lisParser = block <@ Program
+lisParser = do 
+              token "program"
+              blk <- block
+              return (Program blk)
 
 
 
@@ -386,6 +423,7 @@ junk = many whitespace
 -- PARSE & EVAL
 
 
+parse (Parser x) = x
 
 bestParse p = (filter (\(v, inp') -> inp' == "")) . parse p
 
@@ -399,6 +437,7 @@ detParse = \inp -> case (parseLIS inp) of
 
 
 execute = evalProgram . fst . detParse
+
 
 evalB (BCte b) mem = b
 evalB (Cmp rop e1 e2) mem = evalROp rop (evalN e1 mem) (evalN e2 mem)
@@ -431,7 +470,7 @@ evalAndApply f e1 e2 mem = f (evalN e1 mem) (evalN e2 mem)
 
 evalN (Variable x) = \mem ->
     case (memoryRead mem x) of
-        Nothing -> error ("Variable " ++ x ++ "indefinida")
+        Nothing -> error ("Variable '" ++ x ++ "' indefinida")
         Just v  -> v
 evalN (NCte n) = \mem -> n
 evalN (Add e1 e2) = evalAndApply (+) e1 e2
@@ -440,4 +479,16 @@ evalN (Mul e1 e2) = evalAndApply (*) e1 e2
 evalN (Div e1 e2) = evalAndApply div e1 e2
 evalN (Mod e1 e2) = evalAndApply mod e1 e2
 
---[ (v, v2) | v <- token "program", v2 <- token "is"]
+----
+
+
+
+
+
+fromFile filename f = do  
+        contents <- readFile filename
+        f contents
+        
+
+executeFile = (flip fromFile) (print . (flip execute) memoryNew)
+parseFile = (flip fromFile) (print . (parse lisParser))
