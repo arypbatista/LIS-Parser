@@ -84,10 +84,10 @@ class Monad m => MonadFailureOr m where
     (<|>)    ::  m a -> m a -> m a
     
 instance Monad Parser where
-    return v         =  Parser (\inp -> [(v, junkOut inp)])
+    return v         =  Parser (\inp -> [(v, inp)])
     Parser p >>= f   =  Parser (\inp -> 
-                          concat [ parse (f v) (junkOut out) | 
-                                   (v, out) <- p (junkOut inp) ])
+                          concat [ parse (f v)  out  | 
+                                   (v, out) <- p inp ])
 
 instance MonadFailureOr Parser where
     failure                    =  Parser(\inp -> [])
@@ -165,7 +165,7 @@ braced p        = pack (symbol '{') p (symbol '}')
 optionDef p def  =  p
                 <|> return def
 
-option p = optionDef p []
+option p = optionDef (p <@ (:[])) []
 
 
 -- Strings
@@ -236,24 +236,6 @@ p `chainr1` op = do
 
 
 {- Helper functions -}
-
-
--- Remove whitespaces and "--" line comment.
-
-inn :: Eq a => a -> [a] -> Bool
-x `inn` xs = foldr (\y r -> r || (y == x)) False xs
-
-removeWhites = dropWhile (\c -> c `inn` ['\n', '\t', ' '])
-
-removeComments ('-':'-':inp) = dropWhile (\x -> x /= '\n') inp
-removeComments inp           = inp
-                               
-junkOut []  = []
-junkOut inp = let inp' = (removeWhites . removeComments) inp
-              in if inp' /= inp then
-                    junkOut inp'
-                 else
-                    inp'
 
 
 -- Parsing helpers

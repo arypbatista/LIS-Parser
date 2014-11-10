@@ -17,6 +17,7 @@
 
 module LISParser (
     lisParser,
+    lisLexer
 ) where
 
 import Data.Char (ord)
@@ -46,10 +47,10 @@ varname = lowerId
 
 iff = do
         token "if"
-        bexp    <- parenthesized bExpr
-        bt      <- block
-        bf      <- option iffElse
-        return (If bexp bt bf)
+        bexp      <- parenthesized bExpr
+        blockThen <- block
+        blockElse <- optionDef iffElse []
+        return (If bexp blockThen blockElse)
         
 iffElse = do
             token "else"
@@ -85,12 +86,17 @@ command  =  skip
 
 -- Boolean expressions
 
-bExpr  =  bTerm `chainl1` logop
-bTerm  =  bConstant 
-      <|> nCmp
-
-logop  =  op "&&" And
-      <|> op "||" Or
+bExpr    =  bAndTerm `chainl1` orop
+bAndTerm =  bTerm `chainl1` andop
+bTerm    =  do
+              f   <- optionDef notop id
+              b   <- bConstant
+              return (f b)
+        <|> nCmp
+      
+andop    =  op "&&" And 
+orop     =  op "||" Or
+notop    =  op "!"  Not
 
 nCmp   = do
            n1 <- nExpr
@@ -145,3 +151,37 @@ lisParser = do
               token "program"
               blk <- block
               return (Program blk)
+              
+              
+-- Lexer
+
+
+
+lisLexer = removeAllWhites . removeAllComments
+
+removeAllWhites []  = []
+removeAllWhites inp = takeWhile (not . isWhitespace) inp ++
+                      (lisLexer . removeWhites) rest
+                    where
+                      rest = dropWhile (not . isWhitespace) inp
+
+removeWhites = dropWhile isWhitespace
+
+removeAllComments []  = []
+removeAllComments inp = takeWhile (not . (=='-')) inp ++
+                        removeAllComments rest
+                      where
+                        inp2 = dropWhile (not . (=='-')) inp
+                        rest = 
+                          case inp2 of 
+                            ('-':'-':inp) -> removeComments inp2
+                            otherwise     -> inp2
+
+removeComments ('-':'-':inp) = dropWhile (not . isLineBreak) inp
+removeComments inp           = inp
+
+isWhitespace = (flip inn) ['\n', '\t', ' ']
+isLineBreak = (=='\n')
+
+inn :: Eq a => a -> [a] -> Bool
+x `inn` xs = foldr (\y r -> r || (y == x)) False xs

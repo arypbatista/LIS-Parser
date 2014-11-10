@@ -23,7 +23,7 @@ import LISEval
 import LISParser
 
 
-parseLIS = bestFirst lisParser
+parseLIS = (bestFirst lisParser) . lisLexer
 
 execute = evalProgram . fst . parseLIS
 
@@ -33,4 +33,4 @@ fromFile filename f = do
     
 
 executeFile = (flip fromFile) (print . (flip execute) memoryNew)
-parseFile = (flip fromFile) (print . (parse lisParser))
+parseFile = (flip fromFile) (print . (parse lisParser) . lisLexer)

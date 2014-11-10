@@ -27,9 +27,15 @@ module LISEval (
 import Memory
 import LISRepresentation
 
-evalB (BCte b) mem = b
-evalB (Cmp rop e1 e2) mem = evalROp rop (evalN e1 mem) (evalN e2 mem)
-evalB (And e1 e2) mem = evalB e1 mem && evalB e2 mem
+evalB (BCte b) mem        = b
+evalB (Cmp rop e1 e2) mem = evalROp rop (evalN e1 mem) 
+                                        (evalN e2 mem)
+evalB (And e1 e2) mem     = evalBAndCombine e1 e2 (&&) mem
+evalB (Or  e1 e2) mem     = evalBAndCombine e1 e2 (||) mem
+evalB (Not e) mem         = not (evalB e mem)
+
+evalBAndCombine e1 e2 f   = \mem -> f (evalB e1 mem)
+                                      (evalB e2 mem)
 
 evalROp Equal        = (==)
 evalROp NotEqual     = (/=)
